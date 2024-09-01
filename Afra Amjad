@@ -1,0 +1,57 @@
+import cv2
+import numpy as np
+import torch
+from torchvision import models, transforms
+from deep_sort_pytorch.deep_sort import DeepSort
+
+# Load YOLOv5 model (you need a trained model for this, here we use a pre-trained model)
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+
+# Initialize Deep SORT
+deepsort = DeepSort("deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7")
+
+# Set up video capture
+video_path = 'your_video_file.mp4'
+cap = cv2.VideoCapture(video_path)
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Convert frame to RGB and process with YOLO
+    results = model(frame)
+
+    # Extract detections and their confidences
+    detections = results.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2, conf, cls)
+
+    # Filter detections for persons (class 0 in COCO dataset)
+    person_detections = [d for d in detections if d[5] == 0]
+
+    # Convert to Deep SORT format
+    bbox_xywh = []
+    confs = []
+    for x1, y1, x2, y2, conf, cls in person_detections:
+        obj = [x1, y1, x2 - x1, y2 - y1]
+        bbox_xywh.append(obj)
+        confs.append(conf)
+
+    bbox_xywh = np.array(bbox_xywh)
+    confs = np.array(confs)
+
+    # Update tracker
+    outputs = deepsort.update(bbox_xywh, confs, frame)
+
+    # Draw bounding boxes and IDs
+    for output in outputs:
+        x1, y1, x2, y2, track_id = output
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f'ID: {track_id}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    cv2.imshow('Intrusion Detection', frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
